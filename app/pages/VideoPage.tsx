@@ -2,13 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { resizeVideo } from '../lib/videoutils'; // videoutilsからresizeVideo関数をインポート
 import type { VideoExtensions } from "../commons/fileconst";
 
-// UI コンポーネントのインポート
 import { Button } from "~/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
-  // CardFooter, // 必要に応じて
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
@@ -162,7 +160,7 @@ export function VideoPage() {
 
   return (
     // Cardで全体をラップし、中央寄せと最大幅を設定
-    <Card className="max-w-3xl mx-auto my-8">
+    <Card className="max-w-3xl mx-auto my-4">
       <CardHeader>
         <CardTitle>Resize Video</CardTitle>
         <CardDescription>

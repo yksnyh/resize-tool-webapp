@@ -1,4 +1,4 @@
-import type { Route } from "./+types/about";
+import type { Route } from "./+types/video";
 import { VideoPage } from "../pages/VideoPage";
 
 export function meta({ }: Route.MetaArgs) {
@@ -8,6 +8,6 @@ export function meta({ }: Route.MetaArgs) {
   ];
 }
 
-export default function AboutPage() {
+export default function Video() {
   return <VideoPage />;
 }

@@ -4,4 +4,4 @@
 # React Router
 /.react-router/
 /build/
-# public/assets/libs/3rd-party/
+public/assets/libs/3rd-party/
