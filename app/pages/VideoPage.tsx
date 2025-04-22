@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { resizeVideo } from '../lib/videoutils'; // videoutilsからresizeVideo関数をインポート
 import type { VideoExtensions } from "../commons/fileconst";
 
@@ -14,74 +14,118 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 // FormItem は react-hook-form なしでもレイアウトに使える
 import { FormItem } from "~/components/ui/form"; // FormItemのみインポート
+import { Progress } from "~/components/ui/progress"; // 進捗バーを追加 (任意)
+import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert"; // アラート表示用
+import { XCircle } from "lucide-react"; // エラーアイコン用
 
 const supportedExtensions: VideoExtensions[] = ['mp4', 'mov', 'webm'];
-const defaultOutputExtension = 'mp4'; // 出力はMP4固定
+const defaultOutputExtension = 'mp4';
+const MAX_FILES = 3; // 最大ファイル数
+
+// 各ファイルの処理結果を管理するインターフェース
+interface ProcessingResult {
+  file: File;
+  status: 'pending' | 'processing' | 'success' | 'error';
+  outputBlob?: Blob;
+  outputUrl?: string;
+  progressLog: string[];
+  error?: string;
+  progressPercent?: number; // 進捗率 (任意)
+}
 
 export function VideoPage() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [width, setWidth] = useState<number | ''>('');
   const [height, setHeight] = useState<number | ''>('');
   const [fps, setFps] = useState<number | ''>('');
-  const [outputBlob, setOutputBlob] = useState<Blob | null>(null);
-  const [outputUrl, setOutputUrl] = useState<string | null>(null);
-  const [progressLog, setProgressLog] = useState<string[]>([]); // 進捗メッセージを配列で管理
+  const [results, setResults] = useState<ProcessingResult[]>([]); // ファイルごとの結果を管理
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // グローバルなエラー（ファイル選択、パラメータ等）
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const progressEndRef = useRef<HTMLDivElement>(null); // 進捗表示の末尾参照用
+  const progressEndRefs = useRef<(HTMLDivElement | null)[]>([]); // 各ログエリアの末尾参照用
 
-  // outputUrlが変更されたら、古いURLを解放する
+  // resultsが変更されたら、不要になった古いURLを解放する
   useEffect(() => {
+    const urlsToRevoke = results
+      .filter(r => r.outputUrl)
+      .map(r => r.outputUrl as string);
+
     return () => {
-      if (outputUrl) {
-        URL.revokeObjectURL(outputUrl);
-      }
+      urlsToRevoke.forEach(url => URL.revokeObjectURL(url));
+      // コンポーネントアンマウント時に現在のresultsにあるURLも解放
+      results.forEach(r => {
+        if (r.outputUrl) {
+          URL.revokeObjectURL(r.outputUrl);
+        }
+      });
     };
-  }, [outputUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results]); // resultsの変更を監視
 
-  // 進捗ログが更新されたら、表示エリアの最下部にスクロールする
+  // 進捗ログが更新されたら、該当する表示エリアの最下部にスクロールする
   useEffect(() => {
-    progressEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [progressLog]);
+    results.forEach((result, index) => {
+      if (result.status === 'processing' || result.status === 'success' || result.status === 'error') {
+        progressEndRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }
+    });
+  }, [results]); // resultsの変更（特にprogressLogの更新）を監視
 
   // ファイル選択ハンドラ
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const fileExt = file.name.split('.').pop()?.toLowerCase();
-      if (fileExt && supportedExtensions.includes(fileExt as VideoExtensions)) {
-        setSelectedFile(file);
-        setOutputBlob(null);
-        setOutputUrl(null);
-        setError(null);
-        setProgressLog([]); // 進捗ログリセット
-      } else {
-        setError(`Unsupported file type: .${fileExt}. Supported types: ${supportedExtensions.join(', ')}`);
-        setSelectedFile(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = ''; // ファイル入力をリセット
+    const files = event.target.files;
+    if (files) {
+      const newFiles: File[] = [];
+      const fileErrors: string[] = [];
+      let acceptedCount = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (acceptedCount >= MAX_FILES) {
+          fileErrors.push(`You can only select up to ${MAX_FILES} files. File "${file.name}" was ignored.`);
+          continue; // 最大数を超えたらスキップ
         }
+
+        const fileExt = file.name.split('.').pop()?.toLowerCase();
+        if (fileExt && supportedExtensions.includes(fileExt as VideoExtensions)) {
+          newFiles.push(file);
+          acceptedCount++;
+        } else {
+          fileErrors.push(`Unsupported file type: "${file.name}". Supported types: ${supportedExtensions.join(', ')}`);
+        }
+      }
+
+      setSelectedFiles(newFiles);
+      setResults([]); // ファイル選択が変わったら結果をリセット
+      setError(fileErrors.length > 0 ? fileErrors.join('\n') : null); // ファイル選択時のエラーを表示
+
+      // ファイル入力自体をリセットしないと、同じファイルを選択し直せない
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
     }
   };
 
-  // 進捗メッセージを追加する関数
-  const addProgress = (message: string) => {
-    // FFmpegのログは詳細すぎる場合があるので、必要に応じてフィルタリングしても良い
-    setProgressLog((prev) => [...prev, message]);
-  };
+  // 特定のファイルの進捗メッセージを追加/更新する関数
+  const updateProgress = useCallback((fileIndex: number, message: string, percent?: number) => {
+    setResults(prevResults => {
+      const newResults = [...prevResults];
+      if (newResults[fileIndex]) {
+        // FFmpegのログは非常に多いので、最新の数件のみ保持するなどしても良い
+        newResults[fileIndex] = {
+          ...newResults[fileIndex],
+          progressLog: [...newResults[fileIndex].progressLog, message],
+          progressPercent: percent !== undefined ? percent : newResults[fileIndex].progressPercent, // 進捗率を更新
+        };
+      }
+      return newResults;
+    });
+  }, []);
 
   // 変換ボタンクリックハンドラ
   const handleResizeClick = async () => {
-    if (!selectedFile) {
-      setError('Please select a video file first.');
-      return;
-    }
-
-    const fileExt = selectedFile.name.split('.').pop()?.toLowerCase() as VideoExtensions;
-    if (!fileExt || !supportedExtensions.includes(fileExt)) {
-      setError(`Invalid file extension: ${fileExt}`);
+    if (selectedFiles.length === 0) {
+      setError('Please select at least one video file.');
       return;
     }
 
@@ -101,54 +145,97 @@ export function VideoPage() {
     }
 
     setIsProcessing(true);
-    setError(null);
-    setOutputBlob(null);
-    if (outputUrl) {
-      URL.revokeObjectURL(outputUrl); // 古いURLを解放
-      setOutputUrl(null);
-    }
-    setProgressLog(['Starting process...']); // 進捗ログ初期化
+    setError(null); // グローバルエラーをクリア
 
-    try {
-      // videoutils.ts の resizeVideo を呼び出し、進捗コールバックを渡す
-      const resultBlob = await resizeVideo(
-        selectedFile,
-        targetWidth,
-        targetHeight,
-        targetFps,
-        fileExt,
-        addProgress // 進捗メッセージを受け取る関数
-      );
+    // 処理対象ファイルの初期状態を設定
+    const initialResults: ProcessingResult[] = selectedFiles.map(file => ({
+      file,
+      status: 'pending',
+      progressLog: [],
+      progressPercent: 0,
+    }));
+    setResults(initialResults);
+    progressEndRefs.current = initialResults.map(() => null); // ref配列を初期化
 
-      if (resultBlob) {
-        setOutputBlob(resultBlob);
-        const url = URL.createObjectURL(resultBlob);
-        setOutputUrl(url);
-        addProgress('Processing complete! Output video is ready.');
-      } else {
-        // resizeVideoがnullを返した場合 (エラーはコールバックで通知されているはず)
-        setError('Video processing failed. Check progress log for details.');
-        addProgress('Error: Processing failed.');
+    // 各ファイルを順次処理 (並列処理する場合は Promise.all などを使用)
+    // ここでは順次処理の例
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      const fileExt = file.name.split('.').pop()?.toLowerCase() as VideoExtensions;
+
+      // 結果オブジェクトを 'processing' に更新
+      setResults(prev => {
+        const newResults = [...prev];
+        newResults[i] = { ...newResults[i], status: 'processing', progressLog: ['Starting process...'] };
+        return newResults;
+      });
+
+      try {
+        // videoutils.ts の resizeVideo を呼び出し、進捗コールバックを渡す
+        const resultBlob = await resizeVideo(
+          file,
+          targetWidth,
+          targetHeight,
+          targetFps,
+          fileExt,
+          (message, percent) => updateProgress(i, message, percent) // 進捗メッセージとパーセントを受け取る
+        );
+
+        if (resultBlob) {
+          const url = URL.createObjectURL(resultBlob);
+          setResults(prev => {
+            const newResults = [...prev];
+            newResults[i] = {
+              ...newResults[i],
+              status: 'success',
+              outputBlob: resultBlob,
+              outputUrl: url,
+              progressLog: [...newResults[i].progressLog, 'Processing complete! Output video is ready.'],
+              progressPercent: 100,
+            };
+            return newResults;
+          });
+        } else {
+          // resizeVideoがnullを返した場合 (エラーはコールバックで通知されているはず)
+          setResults(prev => {
+            const newResults = [...prev];
+            const errorMessage = 'Video processing failed. Check progress log for details.';
+            newResults[i] = {
+              ...newResults[i],
+              status: 'error',
+              error: errorMessage,
+              progressLog: [...newResults[i].progressLog, `Error: ${errorMessage}`],
+            };
+            return newResults;
+          });
+        }
+      } catch (err: any) {
+        // resizeVideo呼び出し自体で予期せぬエラーが発生した場合
+        console.error(`Error processing file ${file.name}:`, err);
+        const errorMessage = `An unexpected error occurred: ${err.message || err}`;
+        setResults(prev => {
+          const newResults = [...prev];
+          newResults[i] = {
+            ...newResults[i],
+            status: 'error',
+            error: errorMessage,
+            progressLog: [...newResults[i].progressLog, `Error: ${errorMessage}`],
+          };
+          return newResults;
+        });
       }
-    } catch (err: any) {
-      // resizeVideo呼び出し自体で予期せぬエラーが発生した場合
-      console.error('Error during resizeVideo call:', err);
-      const errorMessage = `An unexpected error occurred: ${err.message || err}`;
-      setError(errorMessage);
-      addProgress(`Error: ${errorMessage}`);
-    } finally {
-      setIsProcessing(false); // 処理完了
     }
+
+    setIsProcessing(false); // 全ての処理完了
   };
 
   // ダウンロードハンドラ
-  const handleDownload = () => {
-    if (outputUrl && outputBlob) {
+  const handleDownload = (url: string | undefined, blob: Blob | undefined, originalFileName: string) => {
+    if (url && blob) {
       const link = document.createElement('a');
-      link.href = outputUrl;
-      // 元のファイル名に基づいてダウンロードファイル名を生成
-      const originalName = selectedFile?.name.split('.').slice(0, -1).join('.') || 'video';
-      link.download = `${originalName}_resized.${defaultOutputExtension}`; // 出力拡張子を使用
+      link.href = url;
+      const baseName = originalFileName.split('.').slice(0, -1).join('.') || 'video';
+      link.download = `${baseName}_resized.${defaultOutputExtension}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -159,33 +246,37 @@ export function VideoPage() {
   const acceptTypes = supportedExtensions.map(ext => `video/${ext},.${ext}`).join(',');
 
   return (
-    // Cardで全体をラップし、中央寄せと最大幅を設定
-    <Card className="max-w-3xl mx-auto my-4">
+    <Card className="max-w-4xl mx-auto my-4"> {/* 最大幅を少し広げる */}
       <CardHeader>
-        <CardTitle>Resize Video</CardTitle>
+        <CardTitle>Resize Multiple Videos</CardTitle>
         <CardDescription>
-          Select a video file, specify desired dimensions (width/height) and/or FPS, then click "Resize Video".
+          Select up to {MAX_FILES} video files, specify desired dimensions (width/height) and/or FPS, then click "Resize Videos".
         </CardDescription>
       </CardHeader>
 
-      {/* フォーム要素や結果をCardContentに入れる */}
       <CardContent className="grid gap-6">
         {/* ファイル選択 */}
         <FormItem>
-          <Label htmlFor="videoFile">Select Video File</Label>
+          <Label htmlFor="videoFiles">Select Video Files (Max {MAX_FILES})</Label>
           <Input
             ref={fileInputRef}
             type="file"
-            id="videoFile"
+            id="videoFiles"
             accept={acceptTypes}
             onChange={handleFileChange}
             disabled={isProcessing}
-            className="w-full" // 幅を調整
+            multiple // 複数ファイル選択を許可
+            className="w-full"
           />
-          {selectedFile && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
-            </p>
+          {selectedFiles.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <p className="text-sm font-medium">Selected Files:</p>
+              <ul className="list-disc list-inside text-sm text-muted-foreground">
+                {selectedFiles.map((file, index) => (
+                  <li key={index}>{file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)</li>
+                ))}
+              </ul>
+            </div>
           )}
         </FormItem>
 
@@ -201,9 +292,8 @@ export function VideoPage() {
               placeholder="Auto"
               min="1"
               disabled={isProcessing}
-              className="w-full" // 幅を調整
+              className="w-full"
             />
-            {/* FormDescriptionの代わりにpタグを使用 */}
             <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
           </FormItem>
 
@@ -217,9 +307,9 @@ export function VideoPage() {
               placeholder="Auto"
               min="1"
               disabled={isProcessing}
-              className="w-full" // 幅を調整
+              className="w-full"
             />
-             <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
+            <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
           </FormItem>
 
           <FormItem>
@@ -232,70 +322,108 @@ export function VideoPage() {
               placeholder="Original"
               min="1"
               disabled={isProcessing}
-              className="w-full" // 幅を調整
+              className="w-full"
             />
-             <p className="text-xs text-muted-foreground mt-1">Leave blank for original</p>
+            <p className="text-xs text-muted-foreground mt-1">Leave blank for original</p>
           </FormItem>
         </div>
 
         {/* リサイズボタン */}
         <Button
           onClick={handleResizeClick}
-          disabled={isProcessing || !selectedFile}
-          className="w-full sm:w-auto justify-self-start" // 左寄せに変更
+          disabled={isProcessing || selectedFiles.length === 0}
+          className="w-full sm:w-auto justify-self-start"
         >
-          {isProcessing ? 'Processing...' : 'Resize Video'}
+          {isProcessing ? 'Processing...' : `Resize ${selectedFiles.length > 0 ? selectedFiles.length : ''} Video(s)`}
         </Button>
 
-        {/* エラー表示 */}
+        {/* グローバルエラー表示 */}
         {error && (
-          // FormMessageの代わりにpタグを使用
-          <p className="text-sm font-medium text-destructive">
-            Error: {error}
-          </p>
+          <Alert variant="destructive">
+            <XCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>
+              {error.split('\n').map((line, i) => <p key={i}>{line}</p>)}
+            </AlertDescription>
+          </Alert>
         )}
 
-        {/* 進捗ログ */}
-        {(isProcessing || progressLog.length > 1) && ( // 処理中またはログがある場合に表示
-          <div className="space-y-2">
-            <h3 className="text-lg font-semibold">Progress Log:</h3>
-            {/* preタグにUIスタイルを適用 */}
-            <pre className="max-h-60 overflow-y-auto rounded-md border bg-muted p-4 text-sm text-muted-foreground whitespace-pre-wrap break-words">
-              {progressLog.join('\n')}
-              <div ref={progressEndRef} /> {/* スクロール用 */}
-            </pre>
-          </div>
-        )}
+        {/* 結果表示エリア */}
+        {results.length > 0 && (
+          <div className="space-y-6">
+            <h3 className="text-xl font-semibold border-b pb-2">Processing Results:</h3>
+            {results.map((result, index) => (
+              <Card key={index} className="overflow-hidden"> {/* 各結果をカードで囲む */}
+                <CardHeader className="bg-muted/50 p-4">
+                  <CardTitle className="text-base">
+                    File: {result.file.name}
+                    {result.status === 'processing' && <span className="ml-2 text-sm font-normal text-primary animate-pulse"> (Processing...)</span>}
+                    {result.status === 'success' && <span className="ml-2 text-sm font-normal text-green-600"> (Completed)</span>}
+                    {result.status === 'error' && <span className="ml-2 text-sm font-normal text-destructive"> (Failed)</span>}
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Original size: {(result.file.size / 1024 / 1024).toFixed(2)} MB
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-4 grid gap-4">
+                  {/* 進捗バー (任意) */}
+                  {(result.status === 'processing' || result.status === 'success') && result.progressPercent !== undefined && (
+                    <Progress value={result.progressPercent} className="w-full h-2" />
+                  )}
 
-        {/* 結果表示 */}
-        {outputUrl && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Result:</h3>
-            <video
-              controls
-              src={outputUrl}
-              // videoタグにUIスタイルを適用
-              className="w-full max-w-full rounded-md border bg-muted"
-              style={{ maxHeight: '400px' }} // 最大高さはインラインスタイルで維持
-            />
-            <div className="flex items-center gap-4">
-              <Button onClick={handleDownload}>
-                Download Resized Video
-              </Button>
-              {outputBlob && (
-                <span className="text-sm text-muted-foreground">
-                  Output size: {(outputBlob.size / 1024 / 1024).toFixed(2)} MB
-                </span>
-              )}
-            </div>
+                  {/* 進捗ログ */}
+                  {(result.status !== 'pending' && result.progressLog.length > 0) && (
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Progress Log:</Label>
+                      <pre className="max-h-40 overflow-y-auto rounded-md border bg-muted p-3 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+                        {result.progressLog.join('\n')}
+                        <div ref={el => { progressEndRefs.current[index] = el }} /> {/* スクロール用 */}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* エラー表示 */}
+                  {result.status === 'error' && result.error && (
+                    <Alert variant="destructive" className="mt-2">
+                      <XCircle className="h-4 w-4" />
+                      <AlertTitle>Processing Error</AlertTitle>
+                      <AlertDescription className="text-xs">
+                        {result.error}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* 成功時の結果表示 */}
+                  {result.status === 'success' && result.outputUrl && (
+                    <div className="space-y-3">
+                      <Label className="text-xs font-semibold">Result:</Label>
+                      <video
+                        controls
+                        src={result.outputUrl}
+                        className="w-full max-w-sm rounded-md border bg-muted mx-auto" // 中央寄せ、最大幅設定
+                        style={{ maxHeight: '300px' }}
+                      />
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <Button
+                          size="sm"
+                          onClick={() => handleDownload(result.outputUrl, result.outputBlob, result.file.name)}
+                        >
+                          Download Resized Video
+                        </Button>
+                        {result.outputBlob && (
+                          <span className="text-sm text-muted-foreground">
+                            Output size: {(result.outputBlob.size / 1024 / 1024).toFixed(2)} MB
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
       </CardContent>
-
-      {/* CardFooter は今回は特に不要そう */}
-      {/* <CardFooter>
-        <p>Optional footer content</p>
-      </CardFooter> */}
     </Card>
   );
 }

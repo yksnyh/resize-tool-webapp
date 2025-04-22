@@ -4,23 +4,9 @@ import type { LogEvent } from '@ffmpeg/ffmpeg/dist/esm/types';
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 import type { VideoExtensions } from "../commons/fileconst";
-// import { crossMessage } from "../store/CrossMessage";
-
-type MessageType = 'progress';
-
-interface CrossMessage {
-  type: MessageType | null,
-  content: string | null,
-}
-
-const crossMessage: CrossMessage = {
-  type: null,
-  content: null,
-}
 
 // const baseURL = '/assets/libs/3rd-party/ffmpeg/0.12.9-mt';
 const baseURL = '/assets/libs/3rd-party/ffmpeg/0.12.10';
-// const baseURL = 'http://localhost:8777/html/libs/ffmpeg/'
 // const baseURL = 'https://app.unpkg.com/@ffmpeg/core-mt@0.12.9/files/dist/esm/';
 const ffmpeg = new FFmpeg();
 
@@ -37,19 +23,13 @@ export const getVideoSize = async (videoData: Blob): Promise<{ width: number, he
   });
 }
 
-const emitMessage = (msg: string) => {
-  // crossMessage.set({ type: 'progress', content: msg });
-  crossMessage.type = 'progress';
-  crossMessage.content = msg;
-};
-
 export const resizeVideo = async (
   videoData: Blob,
   width: number | null,
   height: number | null,
   fps: number | null,
   ext: VideoExtensions,
-  onProgress: (message: string) => void, 
+  onProgress: (message: string, percent?: number) => void, 
 ): Promise<Blob | null> => {
   if (!width && !height && !fps) return videoData;
 
