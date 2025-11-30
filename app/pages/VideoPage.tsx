@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { resizeVideo } from '../lib/videoutils'; // videoutilsからresizeVideo関数をインポート
-import type { VideoExtensions } from "../commons/fileconst";
+import { resizeVideo, getVideoSize } from '../lib/videoutils'; // videoutilsからresizeVideo関数をインポート
+import { fileExtensions, type VideoExtensions } from "../commons/fileconst";
 
 import { Button } from "~/components/ui/button";
 import {
@@ -18,7 +18,6 @@ import { Progress } from "~/components/ui/progress"; // 進捗バーを追加 (�
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert"; // アラート表示用
 import { XCircle } from "lucide-react"; // エラーアイコン用
 
-const supportedExtensions: VideoExtensions[] = ['mp4', 'mov', 'webm'];
 const defaultOutputExtension = 'mp4';
 const MAX_FILES = 3; // 最大ファイル数
 
@@ -26,6 +25,8 @@ const MAX_FILES = 3; // 最大ファイル数
 interface ProcessingResult {
   file: File;
   status: 'pending' | 'processing' | 'success' | 'error';
+  originalWidth?: number; // オリジナル動画の幅
+  originalHeight?: number; // オリジナル動画の高さ
   outputBlob?: Blob;
   outputUrl?: string;
   progressLog: string[];
@@ -87,11 +88,11 @@ export function VideoPage() {
         }
 
         const fileExt = file.name.split('.').pop()?.toLowerCase();
-        if (fileExt && supportedExtensions.includes(fileExt as VideoExtensions)) {
+        if (fileExt && fileExtensions.video.includes(fileExt as VideoExtensions)) {
           newFiles.push(file);
           acceptedCount++;
         } else {
-          fileErrors.push(`Unsupported file type: "${file.name}". Supported types: ${supportedExtensions.join(', ')}`);
+          fileErrors.push(`Unsupported file type: "${file.name}". Supported types: ${fileExtensions.video.join(', ')}`);
         }
       }
 
@@ -99,12 +100,29 @@ export function VideoPage() {
       setResults([]); // ファイル選択が変わったら結果をリセット
       setError(fileErrors.length > 0 ? fileErrors.join('\n') : null); // ファイル選択時のエラーを表示
 
+      // 新しいファイルごとにProcessingResultの初期状態を作成し、オリジナルサイズを取得
+      Promise.all(newFiles.map(async (file) => {
+        const { width: originalWidth, height: originalHeight } = await getVideoSize(file);
+        return {
+          file,
+          status: 'pending' as const,
+          progressLog: [] as string[],
+          progressPercent: 0,
+          originalWidth,
+          originalHeight,
+        };
+      })).then(initialResults => {
+        setResults(initialResults);
+        progressEndRefs.current = initialResults.map(() => null); // ref配列を初期化
+      });
+
       // ファイル入力自体をリセットしないと、同じファイルを選択し直せない
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
   };
+
 
   // 特定のファイルの進捗メッセージを追加/更新する関数
   const updateProgress = useCallback((fileIndex: number, message: string, percent?: number) => {
@@ -136,6 +154,12 @@ export function VideoPage() {
     // 幅、高さ、FPSのいずれも指定されていない場合はエラー
     if (targetWidth === null && targetHeight === null && targetFps === null) {
       setError('Please specify at least one parameter: width, height, or FPS.');
+      return;
+    }
+
+    // 幅と高さの両方が指定されている場合はエラー
+    if (targetWidth !== null && targetHeight !== null) {
+      setError('Please specify either width or height, not both.');
       return;
     }
     // 不正な値（0以下）が入力された場合はエラー
@@ -242,11 +266,31 @@ export function VideoPage() {
     }
   };
 
+  // クリアハンドラ
+  const handleClear = () => {
+    // 既存のoutputUrlを解放
+    results.forEach(r => {
+      if (r.outputUrl) {
+        URL.revokeObjectURL(r.outputUrl);
+      }
+    });
+    setSelectedFiles([]);
+    setWidth('');
+    setHeight('');
+    setFps('');
+    setResults([]);
+    setIsProcessing(false);
+    setError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   // accept属性を動的に生成
-  const acceptTypes = supportedExtensions.map(ext => `video/${ext},.${ext}`).join(',');
+  const acceptTypes = fileExtensions.video.map(ext => `video/${ext},.${ext}`).join(',');
 
   return (
-    <Card className="max-w-4xl mx-auto my-4"> {/* 最大幅を少し広げる */}
+    <Card className="max-w-4xl mx-auto my-4">
       <CardHeader>
         <CardTitle>Resize Multiple Videos</CardTitle>
         <CardDescription>
@@ -272,8 +316,14 @@ export function VideoPage() {
             <div className="mt-2 space-y-1">
               <p className="text-sm font-medium">Selected Files:</p>
               <ul className="list-disc list-inside text-sm text-muted-foreground">
-                {selectedFiles.map((file, index) => (
-                  <li key={index}>{file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)</li>
+                {results.map((result, index) => (
+                  <li key={index}>
+                    {result.file.name}
+                    ({(result.file.size / 1024 / 1024).toFixed(2)} MB)
+                    {result.originalWidth && result.originalHeight &&
+                      <span className="ml-2">({result.originalWidth}x{result.originalHeight})</span>
+                    }
+                  </li>
                 ))}
               </ul>
             </div>
@@ -281,61 +331,86 @@ export function VideoPage() {
         </FormItem>
 
         {/* サイズとFPSの入力フィールド */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <FormItem>
-            <Label htmlFor="width">Width (px)</Label>
-            <Input
-              type="number"
-              id="width"
-              value={width}
-              onChange={(e) => setWidth(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-              placeholder="Auto"
-              min="1"
-              disabled={isProcessing}
-              className="w-full"
-            />
-            <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
-          </FormItem>
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <FormItem>
+              <Label htmlFor="width">Width (px)</Label>
+              <Input
+                type="number"
+                id="width"
+                value={width}
+                onChange={(e) => {
+                  setWidth(e.target.value === '' ? '' : parseInt(e.target.value, 10));
+                  if (e.target.value !== '') {
+                    setHeight(''); // 幅が入力されたら高さをクリア
+                  }
+                }}
+                placeholder="Auto"
+                min="1"
+                disabled={isProcessing}
+                className="w-full"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
+            </FormItem>
 
-          <FormItem>
-            <Label htmlFor="height">Height (px)</Label>
-            <Input
-              type="number"
-              id="height"
-              value={height}
-              onChange={(e) => setHeight(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-              placeholder="Auto"
-              min="1"
-              disabled={isProcessing}
-              className="w-full"
-            />
-            <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
-          </FormItem>
+            <FormItem>
+              <Label htmlFor="height">Height (px)</Label>
+              <Input
+                type="number"
+                id="height"
+                value={height}
+                onChange={(e) => {
+                  setHeight(e.target.value === '' ? '' : parseInt(e.target.value, 10));
+                  if (e.target.value !== '') {
+                    setWidth(''); // 高さが入力されたら幅をクリア
+                  }
+                }}
+                placeholder="Auto"
+                min="1"
+                disabled={isProcessing}
+                className="w-full"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Leave blank for auto</p>
+            </FormItem>
 
-          <FormItem>
-            <Label htmlFor="fps">FPS</Label>
-            <Input
-              type="number"
-              id="fps"
-              value={fps}
-              onChange={(e) => setFps(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-              placeholder="Original"
-              min="1"
-              disabled={isProcessing}
-              className="w-full"
-            />
-            <p className="text-xs text-muted-foreground mt-1">Leave blank for original</p>
-          </FormItem>
+            <FormItem>
+              <Label htmlFor="fps">FPS</Label>
+              <Input
+                type="number"
+                id="fps"
+                value={fps}
+                onChange={(e) => setFps(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                placeholder="Original"
+                min="1"
+                disabled={isProcessing}
+                className="w-full"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Leave blank for original</p>
+            </FormItem>
+          </div>
+          <p className="text-xs text-yellow-600 dark:text-yellow-400">
+            Note: Please specify either Width or Height, not both.
+          </p>
         </div>
 
-        {/* リサイズボタン */}
-        <Button
-          onClick={handleResizeClick}
-          disabled={isProcessing || selectedFiles.length === 0}
-          className="w-full sm:w-auto justify-self-start"
-        >
-          {isProcessing ? 'Processing...' : `Resize ${selectedFiles.length > 0 ? selectedFiles.length : ''} Video(s)`}
-        </Button>
+        {/* リサイズボタンとクリアボタン */}
+        <div className="flex gap-2">
+          <Button
+            onClick={handleResizeClick}
+            disabled={isProcessing || selectedFiles.length === 0}
+            className="flex-grow sm:flex-grow-0"
+          >
+            {isProcessing ? 'Processing...' : `Resize ${selectedFiles.length > 0 ? selectedFiles.length : ''} Video(s)`}
+          </Button>
+          <Button
+            onClick={handleClear}
+            disabled={isProcessing}
+            variant="outline"
+            className="flex-grow sm:flex-grow-0"
+          >
+            Clear All
+          </Button>
+        </div>
 
         {/* グローバルエラー表示 */}
         {error && (
