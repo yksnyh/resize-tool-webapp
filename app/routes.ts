@@ -6,4 +6,5 @@ export default [
   route("video", "routes/video.tsx"),
   route("image", "routes/image.tsx"),
   route("imageconvert", "routes/imageconvert.tsx"),
+  route("base64image", "routes/base64image.tsx"),
 ] satisfies RouteConfig;
