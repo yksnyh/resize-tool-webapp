@@ -43,34 +43,26 @@ export function VideoPage() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null); // グローバルなエラー（ファイル選択、パラメータ等）
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const progressEndRefs = useRef<(HTMLDivElement | null)[]>([]); // 各ログエリアの末尾参照用
-
-  // resultsが変更されたら、不要になった古いURLを解放する
-  useEffect(() => {
-    const urlsToRevoke = results
-      .filter(r => r.outputUrl)
-      .map(r => r.outputUrl as string);
-
-    return () => {
-      urlsToRevoke.forEach(url => URL.revokeObjectURL(url));
-      // コンポーネントアンマウント時に現在のresultsにあるURLも解放
-      results.forEach(r => {
-        if (r.outputUrl) {
-          URL.revokeObjectURL(r.outputUrl);
-        }
-      });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results]); // resultsの変更を監視
-
-  // 進捗ログが更新されたら、該当する表示エリアの最下部にスクロールする
-  useEffect(() => {
-    results.forEach((result, index) => {
-      if (result.status === 'processing' || result.status === 'success' || result.status === 'error') {
-        progressEndRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "end" });
-      }
-    });
-  }, [results]); // resultsの変更（特にprogressLogの更新）を監視
+    const progressEndRefs = useRef<(HTMLDivElement | null)[]>([]); // 各ログエリアの末尾参照用
+  
+    // resultsの最新の状態を保持するためのref
+    const latestResultsRef = useRef(results);
+  
+    // resultsが更新されるたびにlatestResultsRefを更新
+    useEffect(() => {
+      latestResultsRef.current = results;
+    }, [results]);
+  
+    // コンポーネントアンマウント時に全てのoutputUrlを解放する
+    useEffect(() => {
+      return () => {
+        latestResultsRef.current.forEach(r => {
+          if (r.outputUrl) {
+            URL.revokeObjectURL(r.outputUrl);
+          }
+        });
+      };
+    }, []); // 空の依存配列でアンマウント時のみ実行
 
   // ファイル選択ハンドラ
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {

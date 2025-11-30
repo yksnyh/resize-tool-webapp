@@ -34,9 +34,7 @@ export const resizeVideo = async (
   if (!width && !height && !fps) return videoData;
 
   const { width: beforeWidth, height: beforeHeight } = await getVideoSize(videoData);
-  console.log(beforeWidth, beforeHeight);
   onProgress(`${beforeWidth}: ${beforeHeight}`);
-  // window.dispatchEvent(new CustomEvent('progressMessage', { detail: `${beforeWidth}: ${beforeHeight}` }));
 
   if (!fps) {
     if (beforeWidth === width && (beforeHeight === height || !height)) return videoData;
@@ -48,24 +46,17 @@ export const resizeVideo = async (
   let afterHeight = height ? height : Math.floor((width || 0) * (beforeHeight / beforeWidth));
   if (afterHeight % 2 !== 0) afterHeight += 1;
 
-  afterWidth = beforeWidth / 2;
-  afterHeight = beforeHeight / 2;
-
   try {
     ffmpeg.on('log', ({ message: msg }: LogEvent) => {
-      // message = msg;
-      console.log(msg);
       onProgress(msg);
     });
 
     if (!ffmpeg.loaded) {
-      console.log('loading ffmpeg wasm');
       await ffmpeg.load({
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
         // workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript')
       });
-      console.log('load complete ffmpeg wasm');
     }
 
     const inputFilename = 'tmp.' + ext;
@@ -74,19 +65,9 @@ export const resizeVideo = async (
     if (afterWidth % 2 !== 0 || afterHeight % 2 !== 0) vfOpt = `${vfOpt},format=yuv444p`;
     if (fps) vfOpt = `${vfOpt},fps=${fps}`;
     // ffmpeg.FS('writeFile', name, await fetchFile(files[0]));
-    console.log(vfOpt);
     await ffmpeg.writeFile(inputFilename, await fetchFile(videoData));
-    console.log('ffmpeg.writeFile complete');
     const ret = await ffmpeg.exec(['-i', inputFilename, '-vf', vfOpt, outputFilename]);
-    // const ret = await ffmpeg.exec(['-i', inputFilename, '-s', '630x960', outputFilename]);
-    // const ret = await ffmpeg.exec(['-i', inputFilename, '-vf', 'scale=500:-2', outputFilename]);
-    // const ret = await ffmpeg.exec(['-i', inputFilename, '-vf', 'scale=iw/2:ih/2', outputFilename]);
-    // const ret = await ffmpeg.exec(['-i', inputFilename, '-vf', 'fps=10', outputFilename]);
-    // const ret = await ffmpeg.exec(['-i', inputFilename, '-s', '472x1024', outputFilename]);
-    // const ret = await ffmpeg.exec(['-i', inputFilename, outputFilename]);
-    console.log(`ffmpeg.exec: ${ret}`);
     const data = await ffmpeg.readFile(outputFilename);
-    console.log('complete translate');
     await ffmpeg.deleteFile(outputFilename);
     return new Blob([(data as Uint8Array).buffer], { type: 'video/mp4' })
   } catch (err) {
