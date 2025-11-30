@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { resizeVideo, getVideoSize } from '../lib/videoutils'; // videoutilsからresizeVideo関数をインポート
-import { fileExtensions, type VideoExtensions } from "../commons/fileconst";
+import { fileExtensions, type VideoExtensions } from '../commons/fileconst';
 
-import { Button } from "~/components/ui/button";
+import { Button } from '~/components/ui/button';
 import {
   Card,
   CardContent,
