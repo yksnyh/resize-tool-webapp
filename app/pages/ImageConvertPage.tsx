@@ -35,7 +35,7 @@ export function ImageConvertPage() {
   useEffect(() => {
     const initMagick = async () => {
       try {
-        await initializeImageMagick(new URL('/assets/libs/3rd-party/imagemagick/magick.wasm', window.location.origin));
+        await initializeImageMagick(new URL(import.meta.env.BASE_URL + 'assets/libs/3rd-party/imagemagick/magick.wasm', window.location.origin));
         setIsMagickInitialized(true);
       } catch (e) {
         console.error("Failed to initialize ImageMagick", e);

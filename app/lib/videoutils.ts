@@ -6,7 +6,7 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import type { VideoExtensions } from "../commons/fileconst";
 
 // const baseURL = '/assets/libs/3rd-party/ffmpeg/0.12.9-mt';
-const baseURL = '/assets/libs/3rd-party/ffmpeg/0.12.10';
+const baseURL = import.meta.env.BASE_URL + 'assets/libs/3rd-party/ffmpeg/0.12.10';
 // const baseURL = 'https://app.unpkg.com/@ffmpeg/core-mt@0.12.9/files/dist/esm/';
 const ffmpeg = new FFmpeg();
 
