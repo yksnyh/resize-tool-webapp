@@ -28,6 +28,7 @@ export function ImageConvertPage() {
   const [error, setError] = useState<string | null>(null);
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
   const [outputBlob, setOutputBlob] = useState<Blob | null>(null);
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
   const [isMagickInitialized, setIsMagickInitialized] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +48,9 @@ export function ImageConvertPage() {
     return () => {
       if (outputUrl) {
         URL.revokeObjectURL(outputUrl);
+      }
+      if (displayUrl) {
+        URL.revokeObjectURL(displayUrl);
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -105,6 +109,9 @@ export function ImageConvertPage() {
             case 'jp2':
                 format = MagickFormat.Jp2;
                 break;
+            case 'tiff':
+                format = MagickFormat.Tiff;
+                break;
              // Default to PNG if unknown
             default:
                 format = MagickFormat.Png;
@@ -116,6 +123,16 @@ export function ImageConvertPage() {
             const url = URL.createObjectURL(blob);
             setOutputBlob(blob);
             setOutputUrl(url);
+
+            // For display, if the target format is TIFF or JP2, convert to JPEG for browser compatibility
+            if (targetFormat === 'tiff' || targetFormat === 'jp2') {
+              image.write(MagickFormat.Jpeg, (jpegData) => {
+                const jpegBlob = new Blob([new Uint8Array(jpegData)], { type: 'image/jpeg' });
+                setDisplayUrl(URL.createObjectURL(jpegBlob));
+              });
+            } else {
+              setDisplayUrl(url);
+            }
         });
       });
     } catch (err: any) {
@@ -143,6 +160,8 @@ export function ImageConvertPage() {
       if (outputUrl) URL.revokeObjectURL(outputUrl);
       setOutputUrl(null);
       setOutputBlob(null);
+      if (displayUrl) URL.revokeObjectURL(displayUrl);
+      setDisplayUrl(null);
       setError(null);
       if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -153,9 +172,9 @@ export function ImageConvertPage() {
   // Using generic image/* allows more flexibility for input, 
   // but we can stick to fileExtensions if we want to be strict.
   // The user asked to limit upload to 1 file.
-  const acceptTypes = "image/*,.jp2,image/jp2"; 
+  const acceptTypes = "image/*,.jp2,image/jp2,.tiff,image/tiff"; 
 
-  const targetFormats = ['jpg', 'png', 'gif', 'avif', 'webp', 'bmp', 'jp2'];
+  const targetFormats = ['jpg', 'png', 'gif', 'avif', 'webp', 'bmp', 'jp2', 'tiff'];
 
   return (
     <Card className="max-w-4xl mx-auto my-4">
@@ -232,12 +251,12 @@ export function ImageConvertPage() {
         )}
 
         {/* Result Display */}
-        {outputUrl && (
+        {displayUrl && (
             <div className="space-y-4 border-t pt-4">
                 <h3 className="text-lg font-semibold">Result</h3>
                 <div className="flex flex-col items-center gap-4">
                     <img 
-                        src={outputUrl} 
+                        src={displayUrl} 
                         alt="Converted Result" 
                         className="max-h-[400px] max-w-full object-contain border rounded-md bg-muted"
                     />

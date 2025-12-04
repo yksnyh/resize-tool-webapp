@@ -120,6 +120,7 @@ export function Base64ImagePage() {
         else if (headerHex.startsWith('52494646')) mimeType = 'image/webp';
         else if (headerHex.startsWith('424D')) mimeType = 'image/bmp';
         else if (headerHex.startsWith('0000000C6A502020')) mimeType = 'image/jp2'; // JP2 signature
+        else if (headerHex.startsWith('49492A00') || headerHex.startsWith('4D4D002A')) mimeType = 'image/tiff';
         else mimeType = 'application/octet-stream';
       }
 
@@ -129,12 +130,14 @@ export function Base64ImagePage() {
       let downloadUrl = '';
       let originalBlob = new Blob([arr], { type: mimeType });
 
-      if ((mimeType === 'image/jp2' || headerHex.startsWith('0000000C6A502020'))) {
-          // Special handling for JP2
+      if ((mimeType === 'image/jp2' || headerHex.startsWith('0000000C6A502020') || mimeType === 'image/tiff' || headerHex.startsWith('49492A00') || headerHex.startsWith('4D4D002A'))) {
+          // Special handling for JP2 and TIFF
           if (!isMagickInitialized) {
-              throw new Error("ImageMagick is not initialized. Cannot process JP2.");
+              throw new Error("ImageMagick is not initialized. Cannot process JP2/TIFF.");
           }
-          mimeType = 'image/jp2'; // Ensure mime type is correct if detected by signature
+          if (headerHex.startsWith('0000000C6A502020')) mimeType = 'image/jp2';
+          if (headerHex.startsWith('49492A00') || headerHex.startsWith('4D4D002A')) mimeType = 'image/tiff';
+          
           originalBlob = new Blob([arr], { type: mimeType });
 
           await new Promise<void>((resolve, reject) => {
@@ -212,6 +215,7 @@ export function Base64ImagePage() {
     else if (result.format.includes('svg')) ext = 'svg';
     else if (result.format.includes('bmp')) ext = 'bmp';
     else if (result.format.includes('jp2')) ext = 'jp2';
+    else if (result.format.includes('tiff') || result.format.includes('tif')) ext = 'tiff';
 
     link.download = `decoded-image.${ext}`;
     document.body.appendChild(link);
@@ -236,7 +240,7 @@ export function Base64ImagePage() {
           Base64 to Image Converter
         </CardTitle>
         <CardDescription>
-          Paste a Base64 string (standard or URL-safe) to decode and view the image. Supports typical web images and JP2 (converted to JPEG for display).
+          Paste a Base64 string (standard or URL-safe) to decode and view the image. Supports typical web images, JP2, and TIFF (converted to JPEG for display).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -278,8 +282,8 @@ export function Base64ImagePage() {
                   alt="Decoded" 
                   className="max-w-full max-h-[400px] object-contain" 
                 />
-                {result.format === 'image/jp2' && (
-                    <p className="text-xs text-muted-foreground mt-2">(JP2 preview converted to JPEG)</p>
+                {(result.format === 'image/jp2' || result.format === 'image/tiff') && (
+                    <p className="text-xs text-muted-foreground mt-2">({result.format === 'image/jp2' ? 'JP2' : 'TIFF'} preview converted to JPEG)</p>
                 )}
               </div>
               <div className="space-y-4">
